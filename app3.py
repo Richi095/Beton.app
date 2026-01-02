@@ -35,11 +35,11 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS ref_grades (name TEXT UNIQUE)")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_plants (name TEXT UNIQUE)")
         
-        # --- ПРЕДУСТАНОВЛЕННЫЕ ЗАВОДЫ ---
-        # Добавляем "Участок" и "888" по умолчанию
+        # ПРЕДУСТАНОВКИ (Заводы и Марки)
         default_plants = [("Участок",), ("888",)]
         conn.executemany("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", default_plants)
-        
+        default_grades = [("М100",), ("М150",), ("М200",), ("М250",), ("М300",), ("М350",), ("М400",)]
+        conn.executemany("INSERT OR IGNORE INTO ref_grades (name) VALUES (?)", default_grades)
         conn.commit()
 
 def get_list(table):
@@ -82,53 +82,78 @@ if not st.session_state.auth:
     st.stop()
 
 # ======================================================
-# 3. БОКОВОЕ МЕНЮ (НАСТРОЙКИ)
+# 3. БОКОВОЕ МЕНЮ (РАЗГРАНИЧЕНИЕ ПРАВ)
 # ======================================================
 with st.sidebar:
-    st.title("⚙️ Настройки")
+    st.title("⚙️ Управление")
     st.write(f"👤: **{st.session_state.user}**")
-    
-    # Секция: Заводы
-    st.subheader("🏭 Заводы")
-    if "plt_key" not in st.session_state: st.session_state.plt_key = 0
-    new_plt = st.text_input("Добавить новый завод", key=f"plt_in_{st.session_state.plt_key}")
-    if st.button("➕ Добавить"):
-        if new_plt:
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", (new_plt.strip(),))
-                conn.commit()
-            st.session_state.plt_key += 1
-            st.rerun()
-    for p in get_list("ref_plants"):
-        c_n, c_d = st.columns([4, 1])
-        c_n.caption(p)
-        if c_d.button("🗑️", key=f"del_p_{p}"):
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("DELETE FROM ref_plants WHERE name = ?", (p,))
-                conn.commit()
-            st.rerun()
+    cur_user = st.session_state.user
 
-    st.divider()
-    
-    # Секция: Водители
-    st.subheader("🚚 Водители")
-    if "drv_key" not in st.session_state: st.session_state.drv_key = 0
-    new_drv = st.text_input("ФИО водителя", key=f"drv_in_{st.session_state.drv_key}")
-    if st.button("➕ Добавить водителя"):
-        if new_drv:
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("INSERT OR IGNORE INTO ref_drivers (name) VALUES (?)", (new_drv.strip(),))
-                conn.commit()
-            st.session_state.drv_key += 1
-            st.rerun()
-    for d in get_list("ref_drivers"):
-        c_n, c_d = st.columns([4, 1])
-        c_n.caption(d)
-        if c_d.button("🗑️", key=f"del_d_{d}"):
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("DELETE FROM ref_drivers WHERE name = ?", (d,))
-                conn.commit()
-            st.rerun()
+    # СЕКЦИЯ: ЗАВОДЫ (Только Директор)
+    if cur_user in ["director", "admin"]:
+        st.divider()
+        st.subheader("🏭 Заводы")
+        if "plt_key" not in st.session_state: st.session_state.plt_key = 0
+        new_plt = st.text_input("Новый завод", key=f"plt_in_{st.session_state.plt_key}")
+        if st.button("➕ Добавить завод"):
+            if new_plt:
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", (new_plt.strip(),))
+                    conn.commit()
+                st.session_state.plt_key += 1
+                st.rerun()
+        for p in get_list("ref_plants"):
+            c_n, c_d = st.columns([4, 1])
+            c_n.caption(p)
+            if c_d.button("🗑️", key=f"del_p_{p}"):
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("DELETE FROM ref_plants WHERE name = ?", (p,))
+                    conn.commit()
+                st.rerun()
+
+    # СЕКЦИЯ: ВОДИТЕЛИ (Директор и Бухгалтер)
+    if cur_user in ["director", "buh", "admin"]:
+        st.divider()
+        st.subheader("🚚 Водители")
+        if "drv_key" not in st.session_state: st.session_state.drv_key = 0
+        new_drv = st.text_input("ФИО водителя", key=f"drv_in_{st.session_state.drv_key}")
+        if st.button("➕ Добавить водителя"):
+            if new_drv:
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("INSERT OR IGNORE INTO ref_drivers (name) VALUES (?)", (new_drv.strip(),))
+                    conn.commit()
+                st.session_state.drv_key += 1
+                st.rerun()
+        for d in get_list("ref_drivers"):
+            c_n, c_d = st.columns([4, 1])
+            c_n.caption(d)
+            if c_d.button("🗑️", key=f"del_d_{d}"):
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("DELETE FROM ref_drivers WHERE name = ?", (d,))
+                    conn.commit()
+                st.rerun()
+
+    # СЕКЦИЯ: МАРКИ (Только Директор)
+    if cur_user in ["director", "admin"]:
+        st.divider()
+        st.subheader("💎 Марки")
+        if "grd_key" not in st.session_state: st.session_state.grd_key = 0
+        new_grd = st.text_input("Новая марка", key=f"grd_in_{st.session_state.grd_key}")
+        if st.button("➕ Добавить марку"):
+            if new_grd:
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("INSERT OR IGNORE INTO ref_grades (name) VALUES (?)", (new_grd.strip(),))
+                    conn.commit()
+                st.session_state.grd_key += 1
+                st.rerun()
+        for g in get_list("ref_grades"):
+            c_n, c_d = st.columns([4, 1])
+            c_n.caption(g)
+            if c_d.button("🗑️", key=f"del_g_{g}"):
+                with sqlite3.connect(DB_NAME) as conn:
+                    conn.execute("DELETE FROM ref_grades WHERE name = ?", (g,))
+                    conn.commit()
+                st.rerun()
 
     st.divider()
     if st.button("🚪 Выйти"):
@@ -150,7 +175,6 @@ with t1:
     st.subheader("Новая накладная")
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
-        # Здесь уже будут "Участок" и "888" по умолчанию
         plant_sel = c1.selectbox("🏭 Завод погрузки", PLANTS_LIST)
         obj_in = c2.text_input("📍 Объект (стройплощадка)")
         grade_sel = c3.selectbox("💎 Марка бетона", GRADES_LIST)
@@ -181,7 +205,7 @@ with t1:
                     conn.executemany("INSERT INTO shipments (dt,tm,plant,object,grade,driver,volume,price_m3,total,paid,debt,invoice) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", entries)
                     conn.commit()
                 st.session_state.last_wa_text = wa_msg
-                st.success(f"✅ Записано!")
+                st.success("✅ Сохранено!")
                 st.rerun()
 
         if "last_wa_text" in st.session_state:
@@ -216,22 +240,20 @@ with t2:
         # EXCEL НА РУССКОМ
         df_ex = df.drop(columns=['id', 'msg'], errors='ignore').copy()
         df_ex.columns = ['Дата', 'Время', 'Завод', 'Объект', 'Марка', 'Водитель', 'Объем (м³)', 'Цена', 'Сумма', 'Оплачено', 'Долг', 'Накладная']
-        
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_ex.to_excel(writer, index=False, sheet_name='Отгрузки')
             ws = writer.sheets['Отгрузки']
             for i, col in enumerate(df_ex.columns):
                 ws.set_column(i, i, len(col) + 10)
+        st.download_button("📥 СКАЧАТЬ EXCEL", buf.getvalue(), f"report_{date.today()}.xlsx")
         
-        st.download_button("📥 СКАЧАТЬ EXCEL (РУС)", buf.getvalue(), f"report_{date.today()}.xlsx")
-        
-        with st.expander("🛠️ Редактировать / Удалить"):
-            e_id = st.number_input("Введите ID записи", min_value=0, step=1, format="%d")
-            if e_id > 0:
-                row = df[df['id'] == e_id]
-                if not row.empty:
-                    if st.button("🗑️ Удалить запись из базы", type="secondary"):
+        # УДАЛЕНИЕ (Только Директор)
+        if cur_user in ["director", "admin"]:
+            with st.expander("🛠️ Удалить запись"):
+                e_id = st.number_input("Введите ID записи", min_value=0, step=1, format="%d")
+                if e_id > 0:
+                    if st.button("🗑️ Удалить из базы", type="secondary"):
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("DELETE FROM shipments WHERE id=?", (e_id,))
                             conn.commit()
@@ -252,9 +274,3 @@ with t3:
                 c3.metric("Долг", f"{int(r['d']):,}")
                 prog = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
                 st.progress(prog, text=f"Оплата: {prog:.1%}")
-
-# --- ВКЛАДКА 4: АНАЛИТИКА ---
-with t4:
-    if not df.empty:
-        st.write("📊 **Объемы по водителям (м³)**")
-        st.bar_chart(df.groupby("driver")["volume"].sum())

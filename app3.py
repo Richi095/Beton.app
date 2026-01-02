@@ -45,9 +45,17 @@ def get_list(table):
 init_db()
 
 # ======================================================
-# 2. АВТОРИЗАЦИЯ
+# 2. АВТОРИЗАЦИЯ С ПАМЯТЬЮ В URL
 # ======================================================
 USERS = {"director": "1234", "buh": "1111", "oper": "2222", "admin": "admin"}
+
+# Проверяем, есть ли пометка о входе в адресе страницы
+query_params = st.query_params
+if "logged_in" in query_params and "auth" not in st.session_state:
+    user_from_url = query_params["logged_in"]
+    if user_from_url in USERS:
+        st.session_state.auth = True
+        st.session_state.user = user_from_url
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
@@ -62,6 +70,8 @@ if not st.session_state.auth:
             if st.button("Вход в систему"):
                 if login in USERS and USERS[login] == psw:
                     st.session_state.update({"auth": True, "user": login})
+                    # Добавляем пометку в URL, чтобы не вылетало при обновлении
+                    st.query_params["logged_in"] = login
                     st.rerun()
                 else: st.error("❌ Ошибка доступа")
     st.stop()
@@ -116,6 +126,7 @@ with st.sidebar:
 
     st.divider()
     if st.button("🚪 Выйти"):
+        st.query_params.clear() # Очищаем URL при выходе
         st.session_state.clear()
         st.rerun()
 

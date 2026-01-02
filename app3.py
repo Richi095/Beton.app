@@ -17,7 +17,7 @@ st.markdown("""
     .wa-button { 
         background-color: #25D366; color: white; border: none; padding: 15px; 
         border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; 
-        text-align: center; text-decoration: none; display: block;
+        text-align: center; text-decoration: none; display: block; margin-top: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -49,7 +49,7 @@ init_db()
 # ======================================================
 USERS = {"director": "1234", "buh": "1111", "oper": "2222", "admin": "admin"}
 
-# Проверяем, есть ли пометка о входе в адресе страницы
+# Механизм сохранения входа при обновлении страницы
 query_params = st.query_params
 if "logged_in" in query_params and "auth" not in st.session_state:
     user_from_url = query_params["logged_in"]
@@ -70,22 +70,22 @@ if not st.session_state.auth:
             if st.button("Вход в систему"):
                 if login in USERS and USERS[login] == psw:
                     st.session_state.update({"auth": True, "user": login})
-                    # Добавляем пометку в URL, чтобы не вылетало при обновлении
                     st.query_params["logged_in"] = login
                     st.rerun()
                 else: st.error("❌ Ошибка доступа")
     st.stop()
 
 # ======================================================
-# 3. БОКОВОЕ МЕНЮ
+# 3. БОКОВОЕ МЕНЮ (НАСТРОЙКИ)
 # ======================================================
 with st.sidebar:
     st.title("⚙️ Настройки")
     st.write(f"👤: **{st.session_state.user}**")
     
+    # Секция: Водители
     st.subheader("🚚 Водители")
     if "drv_key" not in st.session_state: st.session_state.drv_key = 0
-    new_drv = st.text_input("Добавить ФИО", key=f"drv_in_{st.session_state.drv_key}")
+    new_drv = st.text_input("ФИО водителя", key=f"drv_in_{st.session_state.drv_key}")
     if st.button("➕ Добавить водителя"):
         if new_drv:
             with sqlite3.connect(DB_NAME) as conn:
@@ -104,9 +104,11 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
+    
+    # Секция: Марки
     st.subheader("💎 Марки")
     if "grd_key" not in st.session_state: st.session_state.grd_key = 0
-    new_grd = st.text_input("Добавить марку", key=f"grd_in_{st.session_state.grd_key}")
+    new_grd = st.text_input("Марка бетона", key=f"grd_in_{st.session_state.grd_key}")
     if st.button("➕ Сохранить марку"):
         if new_grd:
             with sqlite3.connect(DB_NAME) as conn:
@@ -126,7 +128,7 @@ with st.sidebar:
 
     st.divider()
     if st.button("🚪 Выйти"):
-        st.query_params.clear() # Очищаем URL при выходе
+        st.query_params.clear()
         st.session_state.clear()
         st.rerun()
 
@@ -142,9 +144,9 @@ t1, t2, t3, t4 = st.tabs(["📝 Отгрузка", "📖 Журнал", "🏗️
 with t1:
     st.subheader("Новая накладная")
     with st.container(border=True):
-        c1, c2 = st.columns(2)
-        obj_name = c1.text_input("📍 Объект")
-        grade_name = c2.selectbox("💎 Марка бетона", GRADES_LIST)
+        col1, col2 = st.columns(2)
+        obj_name = col1.text_input("📍 Объект (стройплощадка)")
+        grade_name = col2.selectbox("💎 Марка бетона", GRADES_LIST)
         selected_drvs = st.multiselect("🚛 Выберите водителей", DRIVERS_LIST)
 
     if selected_drvs:
@@ -153,36 +155,40 @@ with t1:
         prepaid = f2.number_input("Общая предоплата", min_value=0, step=500, value=0, format="%d")
 
         shipment_entries = []
-        wa_text = f"🏗️ *ОТГРУЗКА:* {obj_name}\n💎 *Марка:* {grade_name}\n"
+        # Собираем текст для WhatsApp
+        current_wa_msg = f"🏗️ *БЕТОН-ЗАВОД*\n📍 *Объект:* {obj_name}\n💎 *Марка:* {grade_name}\n────────────────\n"
         
         for d in selected_drvs:
             with st.container(border=True):
                 ca, cb, cc = st.columns([1, 1, 2])
-                v = ca.number_input(f"м³ ({d})", min_value=0.0, max_value=50.0, step=0.1, value=0.0, key=f"v_{d}", format="%g")
+                v = ca.number_input(f"м³ ({d})", min_value=0.0, max_value=100.0, step=0.1, value=0.0, key=f"v_{d}", format="%g")
                 i = cb.text_input(f"Накл. №", key=f"i_{d}")
                 if v > 0:
                     total_r = v * price_val
                     paid_r = prepaid / len(selected_drvs) if prepaid > 0 else 0
                     shipment_entries.append([date.today().isoformat(), datetime.now().strftime("%H:%M"), obj_name, grade_name, d, v, price_val, total_r, paid_r, (total_r - paid_r), i])
-                    wa_text += f"🚛 {d}: *{v} м³* (№{i})\n"
+                    current_wa_msg += f"🚛 {d}: *{v} м³* (№{i})\n"
 
         if st.button("💾 СОХРАНИТЬ В БАЗУ", type="primary"):
             if obj_name and shipment_entries:
                 with sqlite3.connect(DB_NAME) as conn:
                     conn.executemany("INSERT INTO shipments (dt,tm,object,grade,driver,volume,price_m3,total,paid,debt,invoice) VALUES (?,?,?,?,?,?,?,?,?,?,?)", shipment_entries)
                     conn.commit()
-                st.session_state.last_wa = wa_text
-                st.success("✅ Сохранено!")
+                st.session_state.last_wa_text = current_wa_msg
+                st.success("✅ Данные успешно записаны!")
                 st.rerun()
+            else:
+                st.error("Укажите объект и объем больше 0")
 
-        if "last_wa" in st.session_state:
-            wa_url = f"https://wa.me/?text={urllib.parse.quote(st.session_state.last_wa)}"
+        if "last_wa_text" in st.session_state:
+            encoded_text = urllib.parse.quote(st.session_state.last_wa_text)
+            wa_url = f"https://wa.me/?text={encoded_text}"
             st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-button">📲 ОТПРАВИТЬ В WHATSAPP</a>', unsafe_allow_html=True)
             if st.button("Очистить форму"):
-                del st.session_state.last_wa
+                del st.session_state.last_wa_text
                 st.rerun()
 
-# --- ВКЛАДКА 2: ЖУРНАЛ ---
+# --- ВКЛАДКА 2: ЖУРНАЛ И EXCEL ---
 with t2:
     st.subheader("📖 Журнал отгрузок")
     fc1, fc2 = st.columns(2)
@@ -201,26 +207,29 @@ with t2:
         if f_drv != "Все": df_j = df_j[df_j['driver'] == f_drv]
         st.dataframe(df_j.drop(columns=['msg'], errors='ignore'), use_container_width=True, hide_index=True)
         
+        # Скачивание в Excel
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             df_j.to_excel(writer, index=False)
-        st.download_button("📥 СКАЧАТЬ В EXCEL", buf.getvalue(), f"report_{date.today()}.xlsx")
+        st.download_button("📥 СКАЧАТЬ В EXCEL", buf.getvalue(), f"otchet_{date.today()}.xlsx")
         
-        with st.expander("🛠️ Редактировать / Удалить"):
-            e_id = st.number_input("ID записи", min_value=0, step=1, format="%d")
+        with st.expander("🛠️ Редактировать / Удалить запись"):
+            e_id = st.number_input("Введите ID записи", min_value=0, step=1, format="%d")
             if e_id > 0:
                 row = df_j[df_j['id'] == e_id]
                 if not row.empty:
                     ec1, ec2 = st.columns(2)
                     nv = ec1.number_input("Новый м³", value=float(row['volume'].values[0]), format="%g")
-                    np = ec2.number_input("Оплата", value=float(row['paid'].values[0]), format="%d")
-                    if st.button("💾 Сохранить"):
+                    np = ec2.number_input("Новая оплата", value=float(row['paid'].values[0]), format="%d")
+                    
+                    bc1, bc2 = st.columns(2)
+                    if bc1.button("💾 Сохранить"):
                         nt = nv * float(row['price_m3'].values[0])
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("UPDATE shipments SET volume=?, paid=?, total=?, debt=? WHERE id=?", (nv, np, nt, (nt-np), e_id))
                             conn.commit()
                         st.rerun()
-                    if st.button("🗑️ Удалить", type="secondary"):
+                    if bc2.button("🗑️ Удалить", type="secondary"):
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("DELETE FROM shipments WHERE id=?", (e_id,))
                             conn.commit()
@@ -237,7 +246,7 @@ with t3:
             with st.container(border=True):
                 c1, c2, c3 = st.columns([2, 1, 1])
                 c1.markdown(f"#### 📍 {r['object']}")
-                c2.metric("Объем", f"{r['v']:.1f} м³")
+                c2.metric("Общий объем", f"{r['v']:.1f} м³")
                 c3.metric("Долг", f"{int(r['d']):,}")
                 prog = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
                 st.progress(prog, text=f"Оплата: {prog:.1%}")

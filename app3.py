@@ -34,6 +34,12 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS ref_drivers (name TEXT UNIQUE)")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_grades (name TEXT UNIQUE)")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_plants (name TEXT UNIQUE)")
+        
+        # --- ПРЕДУСТАНОВЛЕННЫЕ ЗАВОДЫ ---
+        # Добавляем "Участок" и "888" по умолчанию
+        default_plants = [("Участок",), ("888",)]
+        conn.executemany("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", default_plants)
+        
         conn.commit()
 
 def get_list(table):
@@ -85,8 +91,8 @@ with st.sidebar:
     # Секция: Заводы
     st.subheader("🏭 Заводы")
     if "plt_key" not in st.session_state: st.session_state.plt_key = 0
-    new_plt = st.text_input("Название завода", key=f"plt_in_{st.session_state.plt_key}")
-    if st.button("➕ Добавить завод"):
+    new_plt = st.text_input("Добавить новый завод", key=f"plt_in_{st.session_state.plt_key}")
+    if st.button("➕ Добавить"):
         if new_plt:
             with sqlite3.connect(DB_NAME) as conn:
                 conn.execute("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", (new_plt.strip(),))
@@ -125,28 +131,6 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-
-    # Секция: Марки
-    st.subheader("💎 Марки")
-    if "grd_key" not in st.session_state: st.session_state.grd_key = 0
-    new_grd = st.text_input("Марка", key=f"grd_in_{st.session_state.grd_key}")
-    if st.button("➕ Добавить марку"):
-        if new_grd:
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("INSERT OR IGNORE INTO ref_grades (name) VALUES (?)", (new_grd.strip(),))
-                conn.commit()
-            st.session_state.grd_key += 1
-            st.rerun()
-    for g in get_list("ref_grades"):
-        c_n, c_d = st.columns([4, 1])
-        c_n.caption(g)
-        if c_d.button("🗑️", key=f"del_g_{g}"):
-            with sqlite3.connect(DB_NAME) as conn:
-                conn.execute("DELETE FROM ref_grades WHERE name = ?", (g,))
-                conn.commit()
-            st.rerun()
-
-    st.divider()
     if st.button("🚪 Выйти"):
         st.query_params.clear()
         st.session_state.clear()
@@ -166,6 +150,7 @@ with t1:
     st.subheader("Новая накладная")
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
+        # Здесь уже будут "Участок" и "888" по умолчанию
         plant_sel = c1.selectbox("🏭 Завод погрузки", PLANTS_LIST)
         obj_in = c2.text_input("📍 Объект (стройплощадка)")
         grade_sel = c3.selectbox("💎 Марка бетона", GRADES_LIST)
@@ -196,7 +181,7 @@ with t1:
                     conn.executemany("INSERT INTO shipments (dt,tm,plant,object,grade,driver,volume,price_m3,total,paid,debt,invoice) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", entries)
                     conn.commit()
                 st.session_state.last_wa_text = wa_msg
-                st.success("✅ Сохранено!")
+                st.success(f"✅ Записано!")
                 st.rerun()
 
         if "last_wa_text" in st.session_state:
@@ -239,23 +224,14 @@ with t2:
             for i, col in enumerate(df_ex.columns):
                 ws.set_column(i, i, len(col) + 10)
         
-        st.download_button("📥 СКАЧАТЬ EXCEL", buf.getvalue(), f"report_{date.today()}.xlsx")
+        st.download_button("📥 СКАЧАТЬ EXCEL (РУС)", buf.getvalue(), f"report_{date.today()}.xlsx")
         
         with st.expander("🛠️ Редактировать / Удалить"):
-            e_id = st.number_input("Введите ID", min_value=0, step=1, format="%d")
+            e_id = st.number_input("Введите ID записи", min_value=0, step=1, format="%d")
             if e_id > 0:
                 row = df[df['id'] == e_id]
                 if not row.empty:
-                    ec1, ec2 = st.columns(2)
-                    nv = ec1.number_input("Новый м³", value=float(row['volume'].values[0]), format="%g")
-                    np = ec2.number_input("Новая оплата", value=float(row['paid'].values[0]), format="%d")
-                    if st.button("💾 Сохранить изменения"):
-                        nt = nv * float(row['price_m3'].values[0])
-                        with sqlite3.connect(DB_NAME) as conn:
-                            conn.execute("UPDATE shipments SET volume=?, paid=?, total=?, debt=? WHERE id=?", (nv, np, nt, (nt-np), e_id))
-                            conn.commit()
-                        st.rerun()
-                    if st.button("🗑️ Удалить запись", type="secondary"):
+                    if st.button("🗑️ Удалить запись из базы", type="secondary"):
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("DELETE FROM shipments WHERE id=?", (e_id,))
                             conn.commit()

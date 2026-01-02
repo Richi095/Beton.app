@@ -138,7 +138,6 @@ with t1:
 
     if selected_drvs:
         f1, f2 = st.columns(2)
-        # format="%d" убирает .0 в отображении по умолчанию
         price_val = f1.number_input("Цена за м³", min_value=0, step=100, value=0, format="%d")
         prepaid = f2.number_input("Общая предоплата", min_value=0, step=500, value=0, format="%d")
 
@@ -148,7 +147,6 @@ with t1:
         for d in selected_drvs:
             with st.container(border=True):
                 ca, cb, cc = st.columns([1, 1, 2])
-                # value=0.0 и format="%g" позволяют видеть 0 без точек, но вводить 7.3
                 v = ca.number_input(f"м³ ({d})", min_value=0.0, max_value=50.0, step=0.1, value=0.0, key=f"v_{d}", format="%g")
                 i = cb.text_input(f"Накл. №", key=f"i_{d}")
                 if v > 0:
@@ -208,4 +206,33 @@ with t2:
                     if st.button("💾 Сохранить"):
                         nt = nv * float(row['price_m3'].values[0])
                         with sqlite3.connect(DB_NAME) as conn:
-                            conn.execute("UPDATE shipments SET volume=?, paid=?, total=?, debt=? WHERE id=?", (nv, np, nt, (nt-np), e_
+                            conn.execute("UPDATE shipments SET volume=?, paid=?, total=?, debt=? WHERE id=?", (nv, np, nt, (nt-np), e_id))
+                            conn.commit()
+                        st.rerun()
+                    if st.button("🗑️ Удалить", type="secondary"):
+                        with sqlite3.connect(DB_NAME) as conn:
+                            conn.execute("DELETE FROM shipments WHERE id=?", (e_id,))
+                            conn.commit()
+                        st.rerun()
+
+# --- ВКЛАДКА 3: СВОДКА ПО ОБЪЕКТАМ ---
+with t3:
+    st.subheader("🏗️ Состояние по объектам")
+    with sqlite3.connect(DB_NAME) as conn:
+        df_o = pd.read_sql("SELECT object, SUM(volume) as v, SUM(total) as t, SUM(paid) as p, SUM(debt) as d FROM shipments GROUP BY object", conn)
+    
+    if not df_o.empty:
+        for _, r in df_o.iterrows():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                c1.markdown(f"#### 📍 {r['object']}")
+                c2.metric("Объем", f"{r['v']:.1f} м³")
+                c3.metric("Долг", f"{int(r['d']):,}")
+                prog = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
+                st.progress(prog, text=f"Оплата: {prog:.1%}")
+
+# --- ВКЛАДКА 4: АНАЛИТИКА ---
+with t4:
+    if not df_j.empty:
+        st.write("📊 **Объемы по водителям (м³)**")
+        st.bar_chart(df_j.groupby("driver")["volume"].sum())

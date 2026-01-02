@@ -1,107 +1,236 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import sqlite3
+from datetime import datetime, date
 import urllib.parse
 
-st.set_page_config(page_title="Бетон Завод (Умный выбор)", layout="wide")
+# ======================================================
+# CONFIG
+# ======================================================
+st.set_page_config(page_title="Бетон Завод", layout="wide")
 
-# ПОЛНЫЙ СПИСОК ВОДИТЕЛЕЙ (добавляй/удаляй имена здесь)
-ALL_DRIVERS = [
-    "Алексей Петров", "Иван Иванов", "Сергей Соколов", "Дмитрий Кузнецов", 
-    "Андрей Попов", "Михаил Новиков", "Артем Морозов", "Игорь Волков", 
-    "Виктор Васильев", "Николай Федоров"
+DB = "database.db"
+
+USERS = {
+    "director": {"password": "1234", "role": "director"},
+    "buh": {"password": "1111", "role": "accountant"},
+    "oper": {"password": "2222", "role": "operator"},  # водитель/оператор
+}
+
+DRIVERS = [
+    "Иванов", "Соколов", "Андреев",
+    "Петров", "Кузнецов", "Морозов"
 ]
 
-if 'db' not in st.session_state:
-    st.session_state.db = []
+# ======================================================
+# DATABASE
+# ======================================================
+conn = sqlite3.connect(DB, check_same_thread=False)
+cur = conn.cursor()
 
-st.title("🏗 Управление отгрузкой")
+cur.execute("""
+CREATE TABLE IF NOT EXISTS shipments(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dt TEXT,
+    tm TEXT,
+    object TEXT,
+    grade TEXT,
+    driver TEXT,
+    volume REAL,
+    price_m3 REAL,
+    total REAL,
+    paid REAL,
+    debt REAL,
+    invoice TEXT,
+    msg TEXT
+)
+""")
+conn.commit()
 
-tab1, tab2, tab3 = st.tabs(["📝 Бухгалтерия", "🧱 Оператор", "🚛 Водители"])
+# ======================================================
+# 🔥 CLEAN OLD MULTIDRIVER RECORDS
+# ======================================================
+rows = cur.execute(
+    "SELECT id, driver, volume, price_m3, total, paid, debt, invoice, dt, tm, object, grade, msg FROM shipments WHERE driver LIKE '%,%'"
+).fetchall()
 
-# --- 1. ВКЛАДКА БУХГАЛТЕРИИ ---
-with tab1:
-    st.subheader("Формирование нового рейса")
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        obj = st.text_input("📍 Объект", placeholder="Куда везем?")
-    with col_b:
-        grade = st.selectbox("💎 Марка", ["М100", "М150", "М200", "М250", "М300", "М350", "М400"])
-    
-    # НОВИНКА: Выбираем только нужных водителей
-    selected_drivers = st.multiselect("👥 Выберите водителей для этого рейса:", ALL_DRIVERS)
-    
-    st.write("---")
-    
-    batch_entries = []
-    if selected_drivers:
-        st.write("**Данные по выбранным машинам:**")
-        # Создаем поля ввода только для тех, кого выбрали
-        for name in selected_drivers:
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                st.markdown(f"🚛 **{name}**")
-            with col2:
-                v = st.number_input(f"Кубы", min_value=0.0, step=0.5, key=f"v_{name}")
-            with col3:
-                n = st.text_input(f"Накл. №", key=f"n_{name}")
-            batch_entries.append({"name": name, "vol": v, "inv": n})
-            st.write("") # Отступ
+for r in rows:
+    drivers = [d.strip() for d in r[1].split(",")]
+    for d in drivers:
+        cur.execute("""
+        INSERT INTO shipments
+        (dt, tm, object, grade, driver, volume,
+         price_m3, total, paid, debt, invoice, msg)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (r[8], r[9], r[10], r[11], d,
+              r[2], r[3], r[4], r[5], r[6], r[7], r[12]))
+    cur.execute("DELETE FROM shipments WHERE id=?", (r[0],))
+conn.commit()
+
+# ======================================================
+# AUTO LOGIN (через query params)
+# ======================================================
+params = st.experimental_get_query_params()
+if "auth" not in st.session_state:
+    if "user" in params and params["user"][0] in USERS:
+        st.session_state.auth = True
+        st.session_state.user = params["user"][0]
+        st.session_state.role = USERS[params["user"][0]]["role"]
     else:
-        st.info("Выберите хотя бы одного водителя выше, чтобы начать ввод")
+        st.session_state.auth = False
 
-    if st.button("💾 СОХРАНИТЬ И СФОРМИРОВАТЬ СПИСОК") and selected_drivers:
-        if obj:
-            # Текст сообщения для WhatsApp
-            report_msg = f"🏗 *ОТГРУЗКА БЕТОНА* 🏗\n📍 *Объект:* {obj}\n💎 *Марка:* {grade}\n--------------------------\n"
-            
-            valid_entries = 0
-            for item in batch_entries:
-                if item['vol'] > 0:
-                    entry = {
-                        "Время": datetime.now().strftime("%H:%M"),
-                        "Объект": obj, "Марка": grade, 
-                        "Объем": item['vol'], "Водитель": item['name'], 
-                        "Накладная": item['inv']
-                    }
-                    st.session_state.db.append(entry)
-                    report_msg += f"🚛 {item['name']}: *{item['vol']} м³* (№{item['inv']})\n"
-                    valid_entries += 1
-            
-            if valid_entries > 0:
-                report_msg += "--------------------------\n✅ *Всем удачного рейса!*"
-                st.session_state['group_msg'] = report_msg
-                st.success(f"Сохранено заявок: {valid_entries}")
-            else:
-                st.warning("Вы не указали объем ни для одного водителя")
+# ======================================================
+# LOGIN
+# ======================================================
+if not st.session_state.auth:
+    st.title("🔐 Вход")
+
+    u = st.text_input("Логин")
+    p = st.text_input("Пароль", type="password")
+
+    if st.button("Войти"):
+        if u in USERS and USERS[u]["password"] == p:
+            st.experimental_set_query_params(user=u)
+            st.session_state.auth = True
+            st.session_state.user = u
+            st.session_state.role = USERS[u]["role"]
+            st.rerun()
         else:
-            st.error("Введите название объекта!")
+            st.error("Неверный логин или пароль")
+    st.stop()
 
-    # Кнопка для WhatsApp
-    if 'group_msg' in st.session_state:
-        st.divider()
-        st.subheader("📲 Отправка в группу")
-        st.code(st.session_state['group_msg'])
-        
-        encoded_report = urllib.parse.quote(st.session_state['group_msg'])
-        wa_group_url = f"https://wa.me/?text={encoded_report}"
-        
+# ======================================================
+# UI
+# ======================================================
+st.title("🏗 Управление отгрузкой бетона")
+st.caption(f"Пользователь: {st.session_state.user} | Роль: {st.session_state.role}")
+
+tabs = st.tabs(["📝 Отгрузка", "📊 Отчёты", "📈 Графики", "🚛 Водители"])
+
+# ======================================================
+# 📝 ОТГРУЗКА
+# ======================================================
+with tabs[0]:
+    st.subheader("Формирование заявки")
+
+    obj = st.text_input("📍 Объект")
+    grade = st.selectbox("💎 Марка", ["М200","М250","М300","М350","М400"])
+    selected = st.multiselect("🚛 Водители", DRIVERS)
+
+    entries = []
+    report = f"🏗 *ОТГРУЗКА БЕТОНА*\n📍 *Объект:* {obj}\n💎 *Марка:* {grade}\n────────────\n"
+
+    for d in selected:
+        c1, c2, c3, c4, c5 = st.columns([2,1,1,1,1])
+        with c1:
+            st.markdown(f"**{d}**")
+        with c2:
+            vol = st.number_input("м³", 0.0, step=0.5, key=f"v{d}")
+        # Бухгалтер видит цену и оплату
+        if st.session_state.role == "accountant":
+            with c3:
+                price = st.number_input("₸/м³", 0.0, step=100.0, key=f"p{d}")
+            with c4:
+                paid = st.number_input("Оплачено ₸", 0.0, step=1000.0, key=f"pay{d}")
+        else:
+            price = 0
+            paid = 0
+        with c5:
+            inv = st.text_input("Накл.", key=f"n{d}")
+
+        if vol > 0:
+            total = vol * price
+            debt = total - paid
+            entries.append((d, vol, price, total, paid, debt, inv))
+            report += f"🚛 {d}: *{vol} м³*"
+            if st.session_state.role == "accountant":
+                report += f" × {price}₸ = *{total}₸* (№{inv})"
+            else:
+                report += f" (№{inv})"
+            report += "\n"
+
+    if st.button("💾 Сохранить заявку"):
+        if not obj or not entries:
+            st.error("Заполните объект и данные водителей")
+        else:
+            for d, vol, price, total, paid, debt, inv in entries:
+                now = datetime.now()
+                dt = now.strftime("%d.%m.%Y")
+                tm = now.strftime("%H:%M:%S")  # точное время заявки
+                cur.execute("""
+                INSERT INTO shipments
+                (dt, tm, object, grade, driver, volume,
+                 price_m3, total, paid, debt, invoice, msg)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    dt, tm, obj, grade, d, vol,
+                    price, total, paid, debt, inv, report
+                ))
+            conn.commit()
+            st.success(f"Сохранено рейсов: {len(entries)}")
+
+    # ===== WhatsApp (последняя заявка) =====
+    last = cur.execute("SELECT msg FROM shipments ORDER BY id DESC LIMIT 1").fetchone()
+    if last:
+        st.subheader("📲 Отправка в WhatsApp")
+        st.code(last[0])
+        url = "https://wa.me/?text=" + urllib.parse.quote(last[0])
         st.markdown(f"""
-            <a href="{wa_group_url}" target="_blank">
-                <button style="width:100%; background-color:#25D366; color:white; border:none; padding:15px; border-radius:10px; font-weight:bold; cursor:pointer; font-size:16px;">
-                    🟢 ОТПРАВИТЬ СПИСОК В ГРУППУ WHATSAPP
-                </button>
-            </a>
+        <a href="{url}" target="_blank">
+        <button style="width:100%;background:#25D366;color:white;
+        padding:15px;border:none;border-radius:10px;font-size:18px;">
+        🟢 ОТПРАВИТЬ В WHATSAPP
+        </button></a>
         """, unsafe_allow_html=True)
 
-# Вкладки Оператор и Водители остаются для контроля
-with tab2:
-    if st.session_state.db:
-        st.table(pd.DataFrame(st.session_state.db).tail(10))
-with tab3:
-    for item in reversed(st.session_state.db):
-        st.info(f"{item['Объект']} | {item['Водитель']} | {item['Объем']}м³")
+# ======================================================
+# 📊 ОТЧЁТЫ
+# ======================================================
+with tabs[1]:
+    d = st.date_input("Дата отчёта", date.today())
+    df = pd.read_sql(
+        "SELECT * FROM shipments WHERE dt=?",
+        conn,
+        params=(d.strftime("%d.%m.%Y"),)
+    )
 
+    if df.empty:
+        st.warning("Нет данных за выбранную дату")
+    else:
+        st.metric("Объём, м³", df["volume"].sum())
+        st.metric("Сумма ₸", df["total"].sum())
+        st.metric("Оплачено ₸", df["paid"].sum())
+        st.metric("Долг ₸", df["debt"].sum())
+        st.dataframe(df, use_container_width=True)
 
+# ======================================================
+# 📈 ГРАФИКИ
+# ======================================================
+with tabs[2]:
+    df = pd.read_sql("SELECT * FROM shipments", conn)
+    if not df.empty:
+        st.bar_chart(df.groupby("driver")["volume"].sum())
+        st.bar_chart(df.groupby("object")["total"].sum())
 
+# ======================================================
+# 🚛 ВОДИТЕЛИ
+# ======================================================
+with tabs[3]:
+    df = pd.read_sql("""
+        SELECT driver,
+               SUM(volume) AS м3,
+               SUM(total) AS сумма,
+               SUM(debt) AS долг
+        FROM shipments
+        GROUP BY driver
+    """, conn)
+    st.table(df)
+
+# ======================================================
+# LOGOUT
+# ======================================================
+st.divider()
+if st.button("🚪 Выйти"):
+    st.experimental_set_query_params()
+    st.session_state.clear()
+    st.rerun()

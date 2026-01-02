@@ -7,7 +7,7 @@ import urllib.parse
 # ======================================================
 # CONFIG
 # ======================================================
-st.set_page_config("Бетон Завод", layout="wide")
+st.set_page_config(page_title="Бетон Завод", layout="wide")
 
 DB = "database.db"
 
@@ -18,34 +18,37 @@ USERS = {
 }
 
 DRIVERS = [
-    "Алексей Петров","Иван Иванов","Сергей Соколов",
-    "Дмитрий Кузнецов","Андрей Попов","Михаил Новиков",
-    "Артем Морозов","Игорь Волков","Виктор Васильев","Николай Федоров"
+    "Иванов", "Соколов", "Андреев",
+    "Петров", "Кузнецов", "Морозов"
 ]
 
 # ======================================================
-# DB
+# DATABASE
 # ======================================================
 conn = sqlite3.connect(DB, check_same_thread=False)
 cur = conn.cursor()
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS shipments(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-dt TEXT,
-tm TEXT,
-object TEXT,
-grade TEXT,
-driver TEXT,
-volume REAL,
-invoice TEXT,
-msg TEXT
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dt TEXT,
+    tm TEXT,
+    object TEXT,
+    grade TEXT,
+    driver TEXT,
+    volume REAL,
+    price_m3 REAL,
+    total REAL,
+    paid REAL,
+    debt REAL,
+    invoice TEXT,
+    msg TEXT
 )
 """)
 conn.commit()
 
 # ======================================================
-# AUTO LOGIN (COOKIE via QUERY PARAM)
+# AUTO LOGIN (через query params)
 # ======================================================
 params = st.experimental_get_query_params()
 
@@ -74,80 +77,42 @@ if not st.session_state.auth:
             st.session_state.role = USERS[u]["role"]
             st.rerun()
         else:
-            st.error("Неверные данные")
+            st.error("Неверный логин или пароль")
     st.stop()
 
 # ======================================================
 # UI
 # ======================================================
 st.title("🏗 Управление отгрузкой бетона")
-st.caption(f"Пользователь: {st.session_state.user}")
+st.caption(f"Пользователь: {st.session_state.user} | Роль: {st.session_state.role}")
 
-tabs = st.tabs(["📝 Отгрузка", "📊 Отчёты", "🚛 Водители"])
+tabs = st.tabs(["📝 Отгрузка", "📊 Отчёты", "📈 Графики", "🚛 Водители"])
 
 # ======================================================
-# 📝 ОТГРУЗКА + WHATSAPP
+# 📝 ОТГРУЗКА
 # ======================================================
 with tabs[0]:
-    obj = st.text_input("Объект")
-    grade = st.selectbox("Марка", ["М200","М250","М300","М350","М400"])
-    sel = st.multiselect("Водители", DRIVERS)
+    st.subheader("Формирование заявки")
 
+    obj = st.text_input("📍 Объект")
+    grade = st.selectbox("💎 Марка", ["М200","М250","М300","М350","М400"])
+    selected = st.multiselect("🚛 Водители", DRIVERS)
+
+    entries = []
     report = f"🏗 *ОТГРУЗКА БЕТОНА*\n📍 *Объект:* {obj}\n💎 *Марка:* {grade}\n────────────\n"
 
-    for d in sel:
-        v = st.number_input(f"{d} м³", 0.0, step=0.5, key=f"v{d}")
-        n = st.text_input(f"{d} накладная", key=f"n{d}")
-        if v > 0:
-            report += f"🚛 {d}: *{v} м³* (№{n})\n"
+    for d in selected:
+        c1, c2, c3, c4, c5 = st.columns([2,1,1,1,1])
+        with c1:
+            st.markdown(f"**{d}**")
+        with c2:
+            vol = st.number_input("м³", 0.0, step=0.5, key=f"v{d}")
+        with c3:
+            price = st.number_input("₸/м³", 0.0, step=100.0, key=f"p{d}")
+        with c4:
+            paid = st.number_input("Оплачено ₸", 0.0, step=1000.0, key=f"pay{d}")
+        with c5:
+            inv = st.text_input("Накл.", key=f"n{d}")
 
-    if st.button("💾 Сохранить заявку"):
-        cur.execute("""
-        INSERT INTO shipments VALUES(NULL,?,?,?,?,?,?,?,?)
-        """, (
-            date.today().strftime("%d.%m.%Y"),
-            datetime.now().strftime("%H:%M"),
-            obj, grade, ",".join(sel), 0, "", report
-        ))
-        conn.commit()
-        st.success("Заявка сохранена")
-
-    # 🔥 КНОПКА WHATSAPP — ВСЕГДА
-    last = cur.execute("SELECT msg FROM shipments ORDER BY id DESC LIMIT 1").fetchone()
-    if last:
-        msg = last[0]
-        st.subheader("📲 Отправка в WhatsApp")
-        st.code(msg)
-        url = "https://wa.me/?text=" + urllib.parse.quote(msg)
-        st.markdown(f"""
-        <a href="{url}" target="_blank">
-        <button style="width:100%;background:#25D366;color:white;
-        padding:15px;border:none;border-radius:10px;font-size:18px;">
-        🟢 ОТПРАВИТЬ В WHATSAPP
-        </button></a>
-        """, unsafe_allow_html=True)
-
-# ======================================================
-# 📊 ОТЧЁТЫ
-# ======================================================
-with tabs[1]:
-    d = st.date_input("Дата", date.today())
-    df = pd.read_sql("SELECT * FROM shipments WHERE dt=?", conn,
-                     params=(d.strftime("%d.%m.%Y"),))
-    st.dataframe(df, use_container_width=True)
-
-# ======================================================
-# 🚛 ВОДИТЕЛИ
-# ======================================================
-with tabs[2]:
-    df = pd.read_sql("SELECT driver,COUNT(*) рейсов FROM shipments GROUP BY driver", conn)
-    st.table(df)
-
-# ======================================================
-# LOGOUT
-# ======================================================
-st.divider()
-if st.button("🚪 Выйти"):
-    st.experimental_set_query_params()
-    st.session_state.clear()
-    st.rerun()
+        if vol > 0 and price > 0:
+            total = vol

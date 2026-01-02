@@ -4,210 +4,120 @@ from datetime import datetime
 import urllib.parse
 import os
 
-# ======================================================
-# НАСТРОЙКИ
-# ======================================================
-st.set_page_config(
-    page_title="Управление отгрузкой бетона",
-    layout="wide"
-)
+# Имя файла для хранения данных
+DB_FILE = "otgruzka.xlsx"
 
-ALL_DRIVERS = [
-    "Алексей Петров", "Иван Иванов", "Сергей Соколов",
-    "Дмитрий Кузнецов", "Андрей Попов", "Михаил Новиков",
-    "Артем Морозов", "Игорь Волков",
-    "Виктор Васильев", "Николай Федоров"
-]
+st.set_page_config(page_title="Управление отгрузкой бетона", layout="wide")
 
 # ======================================================
-# SESSION STATE
+# ЗАГРУЗКА ДАННЫХ (SESSION STATE)
 # ======================================================
 if "db" not in st.session_state:
-    st.session_state.db = []
+    if os.path.exists(DB_FILE):
+        try:
+            # Пытаемся загрузить существующий Excel
+            st.session_state.db = pd.read_excel(DB_FILE).to_dict('records')
+        except Exception:
+            st.session_state.db = []
+    else:
+        st.session_state.db = []
 
 if "wa_msg" not in st.session_state:
     st.session_state.wa_msg = None
 
-if "last_file" not in st.session_state:
-    st.session_state.last_file = None
+# Список водителей
+ALL_DRIVERS = ["Алексей Петров", "Иван Иванов", "Сергей Соколов", "Дмитрий Кузнецов", "Андрей Попов", "Михаил Новиков", "Артем Морозов", "Игорь Волков", "Виктор Васильев", "Николай Федоров"]
 
 # ======================================================
-# UI
+# ИНТЕРФЕЙС
 # ======================================================
 st.title("🏗 Управление отгрузкой бетона")
 
-tab1, tab2, tab3 = st.tabs([
-    "📝 Бухгалтерия",
-    "🧱 Оператор",
-    "🚛 Водители"
-])
+tab1, tab2, tab3 = st.tabs(["📝 Бухгалтерия", "🧱 Оператор", "🚛 Водители"])
 
-# ======================================================
-# 📝 БУХГАЛТЕРИЯ
-# ======================================================
 with tab1:
-    st.subheader("Формирование рейса")
+    st.subheader("Формирование нового рейса")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        obj = st.text_input("📍 Объект", placeholder="Например: Ц1444")
+    with col_b:
+        grade = st.selectbox("💎 Марка бетона", ["М100","М150","М200","М250","М300","М350","М400"])
 
-    c1, c2 = st.columns(2)
-    with c1:
-        obj = st.text_input("📍 Объект")
-    with c2:
-        grade = st.selectbox(
-            "💎 Марка бетона",
-            ["М100","М150","М200","М250","М300","М350","М400"]
-        )
-
-    selected_drivers = st.multiselect(
-        "👥 Выберите водителей",
-        ALL_DRIVERS
-    )
-
-    st.divider()
-
-    batch = []
-    total_volume = 0.0
+    selected_drivers = st.multiselect("👥 Выберите водителей", ALL_DRIVERS)
 
     if selected_drivers:
+        st.markdown("### 🚛 Данные по машинам")
+        batch = []
+        total_volume = 0.0
+        
         for i, name in enumerate(selected_drivers):
-            col1, col2, col3 = st.columns([2,1,1])
-            with col1:
-                st.markdown(f"**{name}**")
-            with col2:
-                vol = st.number_input(
-                    "Кубы",
-                    min_value=0.0,
-                    step=0.5,
-                    key=f"vol_{i}"
-                )
-            with col3:
-                inv = st.text_input(
-                    "Накладная №",
-                    key=f"inv_{i}"
-                )
+            c1, c2, c3 = st.columns([2, 1, 1])
+            with c1:
+                st.write(f"**{name}**")
+            with c2:
+                vol = st.number_input("Кубы", min_value=0.0, step=0.5, key=f"v_{i}")
+            with c3:
+                inv = st.text_input("Накладная №", key=f"n_{i}")
+            
+            if vol > 0:
+                batch.append({"name": name, "vol": vol, "inv": inv})
+                total_volume += vol
 
-            batch.append({
-                "name": name,
-                "vol": vol,
-                "inv": inv
-            })
-            total_volume += vol
-    else:
-        st.info("Выберите водителей")
+        st.metric("🚚 Общий объем рейса", f"{total_volume} м³")
 
-    st.metric("🚚 Общий объем", f"{total_volume} м³")
+        if st.button("💾 СОХРАНИТЬ И СФОРМИРОВАТЬ СПИСОК"):
+            if not obj:
+                st.error("Укажите объект!")
+            else:
+                new_records = []
+                msg = f"🏗 *ОТГРУЗКА БЕТОНА* 🏗\n📍 *Объект:* {obj}\n💎 *Марка:* {grade}\n" + "-"*20 + "\n"
+                
+                for entry in batch:
+                    record = {
+                        "Дата": datetime.now().strftime("%d.%m.%Y"),
+                        "Время": datetime.now().strftime("%H:%M"),
+                        "Объект": obj,
+                        "Марка": grade,
+                        "Водитель": entry["name"],
+                        "Объем": entry["vol"],
+                        "Накладная": entry["inv"]
+                    }
+                    st.session_state.db.append(record)
+                    new_records.append(record)
+                    msg += f"🚛 {entry['name']} — *{entry['vol']} м³* (№{entry['inv']})\n"
+                
+                # Сохранение в файл
+                df = pd.DataFrame(st.session_state.db)
+                df.to_excel(DB_FILE, index=False)
+                
+                st.session_state.wa_msg = msg + "-"*20 + "\n✅ *Всем удачного рейса!*"
+                st.success(f"Записи сохранены в {DB_FILE}")
+                st.rerun()
 
-    # ==================================================
-    # СОХРАНЕНИЕ
-    # ==================================================
-    if st.button("💾 СОХРАНИТЬ И СФОРМИРОВАТЬ СПИСОК"):
-        if not obj:
-            st.error("Введите объект")
-            st.stop()
-
-        if total_volume == 0:
-            st.error("Общий объем 0")
-            st.stop()
-
-        msg = (
-            "🏗 *ОТГРУЗКА БЕТОНА* 🏗\n"
-            f"📍 *Объект:* {obj}\n"
-            f"💎 *Марка:* {grade}\n"
-            "--------------------------\n"
-        )
-
-        saved = 0
-        for item in batch:
-            if item["vol"] > 0 and item["inv"]:
-                st.session_state.db.append({
-                    "Дата": datetime.now().strftime("%d.%m.%Y"),
-                    "Время": datetime.now().strftime("%H:%M"),
-                    "Объект": obj,
-                    "Марка": grade,
-                    "Водитель": item["name"],
-                    "Объем": item["vol"],
-                    "Накладная": item["inv"]
-                })
-
-                msg += f"🚛 {item['name']} — *{item['vol']} м³* (№{item['inv']})\n"
-                saved += 1
-
-        if saved == 0:
-            st.error("Нет заполненных машин")
-            st.stop()
-
-        msg += "--------------------------\n✅ *Всем удачного рейса!*"
-        st.session_state.wa_msg = msg
-
-        # ==============================
-        # АВТО-СОХРАНЕНИЕ (БЕЗ openpyxl)
-        # ==============================
-        df = pd.DataFrame(st.session_state.db)
-        file_created = None
-
-        try:
-            import openpyxl  # проверка наличия
-            df.to_excel("otgruzka.xlsx", index=False)
-            file_created = "otgruzka.xlsx"
-        except Exception:
-            df.to_csv("otgruzka.csv", index=False)
-            file_created = "otgruzka.csv"
-
-        st.session_state.last_file = file_created
-        st.success(f"✅ Сохранено рейсов: {saved}")
-
-    # ==================================================
-    # WHATSAPP + СКАЧИВАНИЕ
-    # ==================================================
+    # Блок WhatsApp
     if st.session_state.wa_msg:
         st.divider()
-        st.subheader("📲 Отправка в WhatsApp")
         st.code(st.session_state.wa_msg)
-
-        encoded = urllib.parse.quote(st.session_state.wa_msg)
-        wa_url = f"https://api.whatsapp.com/send?text={encoded}"
-
+        encoded_msg = urllib.parse.quote(st.session_state.wa_msg)
         st.markdown(f"""
-        <a href="{wa_url}" target="_blank">
-            <button style="
-                width:100%;
-                background:#25D366;
-                color:white;
-                border:none;
-                padding:15px;
-                font-size:16px;
-                border-radius:10px;
-                font-weight:bold;">
-                🟢 ОТПРАВИТЬ В WHATSAPP
-            </button>
-        </a>
+            <a href="https://wa.me/?text={encoded_msg}" target="_blank">
+                <button style="width:100%; background:#25D366; color:white; border:none; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer;">
+                    🟢 ОТПРАВИТЬ В WHATSAPP
+                </button>
+            </a>
         """, unsafe_allow_html=True)
 
-        if st.session_state.last_file and os.path.exists(st.session_state.last_file):
-            with open(st.session_state.last_file, "rb") as f:
-                st.download_button(
-                    f"📥 Скачать {st.session_state.last_file}",
-                    data=f,
-                    file_name=st.session_state.last_file
-                )
-
-# ======================================================
-# 🧱 ОПЕРАТОР
-# ======================================================
 with tab2:
+    st.subheader("Журнал отгрузок")
     if st.session_state.db:
-        st.dataframe(pd.DataFrame(st.session_state.db), use_container_width=True)
+        df_display = pd.DataFrame(st.session_state.db)
+        st.dataframe(df_display.iloc[::-1], use_container_width=True) # Последние сверху
     else:
-        st.info("Нет данных")
+        st.info("Данных пока нет")
 
-# ======================================================
-# 🚛 ВОДИТЕЛИ
-# ======================================================
 with tab3:
+    st.subheader("Последние рейсы")
     if st.session_state.db:
-        for r in reversed(st.session_state.db[-20:]):
-            st.success(
-                f"{r['Дата']} {r['Время']} | {r['Водитель']} | "
-                f"{r['Объем']} м³ | {r['Объект']}"
-            )
-    else:
-        st.info("Пусто")
+        for r in reversed(st.session_state.db[-10:]):
+            st.info(f"🚛 **{r['Водитель']}** | {r['Объем']} м³ | {r['Объект']} (№{r['Накладная']})")

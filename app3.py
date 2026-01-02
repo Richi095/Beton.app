@@ -49,7 +49,6 @@ init_db()
 # ======================================================
 USERS = {"director": "1234", "buh": "1111", "oper": "2222", "admin": "admin"}
 
-# Механизм сохранения входа при обновлении страницы
 query_params = st.query_params
 if "logged_in" in query_params and "auth" not in st.session_state:
     user_from_url = query_params["logged_in"]
@@ -82,11 +81,10 @@ with st.sidebar:
     st.title("⚙️ Настройки")
     st.write(f"👤: **{st.session_state.user}**")
     
-    # Секция: Водители
     st.subheader("🚚 Водители")
     if "drv_key" not in st.session_state: st.session_state.drv_key = 0
     new_drv = st.text_input("ФИО водителя", key=f"drv_in_{st.session_state.drv_key}")
-    if st.button("➕ Добавить водителя"):
+    if st.button("➕ Добавить"):
         if new_drv:
             with sqlite3.connect(DB_NAME) as conn:
                 conn.execute("INSERT OR IGNORE INTO ref_drivers (name) VALUES (?)", (new_drv.strip(),))
@@ -104,11 +102,9 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    
-    # Секция: Марки
     st.subheader("💎 Марки")
     if "grd_key" not in st.session_state: st.session_state.grd_key = 0
-    new_grd = st.text_input("Марка бетона", key=f"grd_in_{st.session_state.grd_key}")
+    new_grd = st.text_input("Марка", key=f"grd_in_{st.session_state.grd_key}")
     if st.button("➕ Сохранить марку"):
         if new_grd:
             with sqlite3.connect(DB_NAME) as conn:
@@ -155,7 +151,6 @@ with t1:
         prepaid = f2.number_input("Общая предоплата", min_value=0, step=500, value=0, format="%d")
 
         shipment_entries = []
-        # Собираем текст для WhatsApp
         current_wa_msg = f"🏗️ *БЕТОН-ЗАВОД*\n📍 *Объект:* {obj_name}\n💎 *Марка:* {grade_name}\n────────────────\n"
         
         for d in selected_drvs:
@@ -175,10 +170,8 @@ with t1:
                     conn.executemany("INSERT INTO shipments (dt,tm,object,grade,driver,volume,price_m3,total,paid,debt,invoice) VALUES (?,?,?,?,?,?,?,?,?,?,?)", shipment_entries)
                     conn.commit()
                 st.session_state.last_wa_text = current_wa_msg
-                st.success("✅ Данные успешно записаны!")
+                st.success("✅ Записи сохранены!")
                 st.rerun()
-            else:
-                st.error("Укажите объект и объем больше 0")
 
         if "last_wa_text" in st.session_state:
             encoded_text = urllib.parse.quote(st.session_state.last_wa_text)
@@ -207,11 +200,19 @@ with t2:
         if f_drv != "Все": df_j = df_j[df_j['driver'] == f_drv]
         st.dataframe(df_j.drop(columns=['msg'], errors='ignore'), use_container_width=True, hide_index=True)
         
-        # Скачивание в Excel
+        # --- ПОДГОТОВКА EXCEL С РУССКИМИ ЗАГОЛОВКАМИ ---
+        df_excel = df_j.drop(columns=['id', 'msg'], errors='ignore').copy()
+        df_excel.columns = ['Дата', 'Время', 'Объект', 'Марка', 'Водитель', 'Объем (м³)', 'Цена', 'Сумма', 'Оплачено', 'Долг', 'Накладная']
+        
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df_j.to_excel(writer, index=False)
-        st.download_button("📥 СКАЧАТЬ В EXCEL", buf.getvalue(), f"otchet_{date.today()}.xlsx")
+            df_excel.to_excel(writer, index=False, sheet_name='Отгрузки')
+            worksheet = writer.sheets['Отгрузки']
+            for i, col in enumerate(df_excel.columns):
+                column_len = max(df_excel[col].astype(str).str.len().max(), len(col)) + 2
+                worksheet.set_column(i, i, column_len)
+        
+        st.download_button("📥 СКАЧАТЬ В EXCEL (РУС)", buf.getvalue(), f"otchet_beton_{date.today()}.xlsx")
         
         with st.expander("🛠️ Редактировать / Удалить запись"):
             e_id = st.number_input("Введите ID записи", min_value=0, step=1, format="%d")
@@ -220,16 +221,14 @@ with t2:
                 if not row.empty:
                     ec1, ec2 = st.columns(2)
                     nv = ec1.number_input("Новый м³", value=float(row['volume'].values[0]), format="%g")
-                    np = ec2.number_input("Новая оплата", value=float(row['paid'].values[0]), format="%d")
-                    
-                    bc1, bc2 = st.columns(2)
-                    if bc1.button("💾 Сохранить"):
+                    np = ec2.number_input("Оплата", value=float(row['paid'].values[0]), format="%d")
+                    if st.button("💾 Сохранить"):
                         nt = nv * float(row['price_m3'].values[0])
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("UPDATE shipments SET volume=?, paid=?, total=?, debt=? WHERE id=?", (nv, np, nt, (nt-np), e_id))
                             conn.commit()
                         st.rerun()
-                    if bc2.button("🗑️ Удалить", type="secondary"):
+                    if st.button("🗑️ Удалить", type="secondary"):
                         with sqlite3.connect(DB_NAME) as conn:
                             conn.execute("DELETE FROM shipments WHERE id=?", (e_id,))
                             conn.commit()
@@ -246,7 +245,7 @@ with t3:
             with st.container(border=True):
                 c1, c2, c3 = st.columns([2, 1, 1])
                 c1.markdown(f"#### 📍 {r['object']}")
-                c2.metric("Общий объем", f"{r['v']:.1f} м³")
+                c2.metric("Объем", f"{r['v']:.1f} м³")
                 c3.metric("Долг", f"{int(r['d']):,}")
                 prog = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
                 st.progress(prog, text=f"Оплата: {prog:.1%}")

@@ -3,17 +3,13 @@ import pandas as pd
 import sqlite3
 from datetime import datetime, date
 import urllib.parse
-import os
 
 # ======================================================
-# НАСТРОЙКИ
+# CONFIG
 # ======================================================
-st.set_page_config(
-    page_title="Бетон Завод",
-    layout="wide"
-)
+st.set_page_config("Бетон Завод", layout="wide")
 
-DB_FILE = "database.db"
+DB = "database.db"
 
 USERS = {
     "director": {"password": "1234", "role": "director"},
@@ -22,52 +18,60 @@ USERS = {
 }
 
 DRIVERS = [
-    "Алексей Петров", "Иван Иванов", "Сергей Соколов",
-    "Дмитрий Кузнецов", "Андрей Попов", "Михаил Новиков",
-    "Артем Морозов", "Игорь Волков",
-    "Виктор Васильев", "Николай Федоров"
+    "Алексей Петров","Иван Иванов","Сергей Соколов",
+    "Дмитрий Кузнецов","Андрей Попов","Михаил Новиков",
+    "Артем Морозов","Игорь Волков","Виктор Васильев","Николай Федоров"
 ]
 
 # ======================================================
-# DATABASE
+# DB
 # ======================================================
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+conn = sqlite3.connect(DB, check_same_thread=False)
 cur = conn.cursor()
 
 cur.execute("""
-CREATE TABLE IF NOT EXISTS shipments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT,
-    time TEXT,
-    object TEXT,
-    grade TEXT,
-    driver TEXT,
-    volume REAL,
-    invoice TEXT,
-    price REAL DEFAULT 0,
-    paid REAL DEFAULT 0
+CREATE TABLE IF NOT EXISTS shipments(
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+dt TEXT,
+tm TEXT,
+object TEXT,
+grade TEXT,
+driver TEXT,
+volume REAL,
+invoice TEXT,
+msg TEXT
 )
 """)
 conn.commit()
 
 # ======================================================
-# AUTH
+# AUTO LOGIN (COOKIE via QUERY PARAM)
 # ======================================================
-if "auth" not in st.session_state:
-    st.session_state.auth = False
-if "role" not in st.session_state:
-    st.session_state.role = None
+params = st.experimental_get_query_params()
 
+if "auth" not in st.session_state:
+    if "user" in params and params["user"][0] in USERS:
+        st.session_state.auth = True
+        st.session_state.user = params["user"][0]
+        st.session_state.role = USERS[params["user"][0]]["role"]
+    else:
+        st.session_state.auth = False
+
+# ======================================================
+# LOGIN
+# ======================================================
 if not st.session_state.auth:
     st.title("🔐 Вход")
 
-    login = st.text_input("Логин")
-    password = st.text_input("Пароль", type="password")
+    u = st.text_input("Логин")
+    p = st.text_input("Пароль", type="password")
 
     if st.button("Войти"):
-        if login in USERS and USERS[login]["password"] == password:
+        if u in USERS and USERS[u]["password"] == p:
+            st.experimental_set_query_params(user=u)
             st.session_state.auth = True
-            st.session_state.role = USERS[login]["role"]
+            st.session_state.user = u
+            st.session_state.role = USERS[u]["role"]
             st.rerun()
         else:
             st.error("Неверные данные")
@@ -77,99 +81,73 @@ if not st.session_state.auth:
 # UI
 # ======================================================
 st.title("🏗 Управление отгрузкой бетона")
-st.caption(f"Роль: {st.session_state.role}")
+st.caption(f"Пользователь: {st.session_state.user}")
 
-tabs = ["🧱 Просмотр", "📊 Отчёты", "📈 Графики"]
-if st.session_state.role in ["accountant", "director"]:
-    tabs.insert(0, "📝 Отгрузка")
-    tabs.append("💰 Оплаты")
-
-tab = st.tabs(tabs)
+tabs = st.tabs(["📝 Отгрузка", "📊 Отчёты", "🚛 Водители"])
 
 # ======================================================
-# 📝 ОТГРУЗКА
+# 📝 ОТГРУЗКА + WHATSAPP
 # ======================================================
-if "📝 Отгрузка" in tabs:
-    with tab[tabs.index("📝 Отгрузка")]:
-        obj = st.text_input("Объект")
-        grade = st.selectbox("Марка", ["М200","М250","М300","М350","М400"])
-        drivers = st.multiselect("Водители", DRIVERS)
+with tabs[0]:
+    obj = st.text_input("Объект")
+    grade = st.selectbox("Марка", ["М200","М250","М300","М350","М400"])
+    sel = st.multiselect("Водители", DRIVERS)
 
-        for d in drivers:
-            vol = st.number_input(f"{d} кубы", 0.0, step=0.5, key=f"v{d}")
-            inv = st.text_input(f"{d} накладная", key=f"i{d}")
-            price = st.number_input(f"{d} сумма", 0.0, step=100.0, key=f"p{d}")
+    report = f"🏗 *ОТГРУЗКА БЕТОНА*\n📍 *Объект:* {obj}\n💎 *Марка:* {grade}\n────────────\n"
 
-            if st.button(f"Добавить {d}", key=f"b{d}"):
-                cur.execute("""
-                INSERT INTO shipments VALUES (
-                    NULL,?,?,?,?,?,?,?,0
-                )
-                """, (
-                    date.today().strftime("%d.%m.%Y"),
-                    datetime.now().strftime("%H:%M"),
-                    obj, grade, d, vol, inv, price
-                ))
-                conn.commit()
-                st.success("Добавлено")
+    for d in sel:
+        v = st.number_input(f"{d} м³", 0.0, step=0.5, key=f"v{d}")
+        n = st.text_input(f"{d} накладная", key=f"n{d}")
+        if v > 0:
+            report += f"🚛 {d}: *{v} м³* (№{n})\n"
 
-# ======================================================
-# 🧱 ПРОСМОТР
-# ======================================================
-with tab[tabs.index("🧱 Просмотр")]:
-    df = pd.read_sql("SELECT * FROM shipments", conn)
-    st.dataframe(df, use_container_width=True)
+    if st.button("💾 Сохранить заявку"):
+        cur.execute("""
+        INSERT INTO shipments VALUES(NULL,?,?,?,?,?,?,?,?)
+        """, (
+            date.today().strftime("%d.%m.%Y"),
+            datetime.now().strftime("%H:%M"),
+            obj, grade, ",".join(sel), 0, "", report
+        ))
+        conn.commit()
+        st.success("Заявка сохранена")
+
+    # 🔥 КНОПКА WHATSAPP — ВСЕГДА
+    last = cur.execute("SELECT msg FROM shipments ORDER BY id DESC LIMIT 1").fetchone()
+    if last:
+        msg = last[0]
+        st.subheader("📲 Отправка в WhatsApp")
+        st.code(msg)
+        url = "https://wa.me/?text=" + urllib.parse.quote(msg)
+        st.markdown(f"""
+        <a href="{url}" target="_blank">
+        <button style="width:100%;background:#25D366;color:white;
+        padding:15px;border:none;border-radius:10px;font-size:18px;">
+        🟢 ОТПРАВИТЬ В WHATSAPP
+        </button></a>
+        """, unsafe_allow_html=True)
 
 # ======================================================
 # 📊 ОТЧЁТЫ
 # ======================================================
-with tab[tabs.index("📊 Отчёты")]:
-    d = st.date_input("Выберите дату", date.today())
-    d_str = d.strftime("%d.%m.%Y")
-
-    df = pd.read_sql("SELECT * FROM shipments WHERE date=?", conn, params=(d_str,))
-
-    if df.empty:
-        st.warning("Нет данных")
-    else:
-        st.metric("Объем", f"{df['volume'].sum()} м³")
-        st.metric("Рейсов", len(df))
-
-        st.subheader("По водителям")
-        st.table(df.groupby("driver")["volume"].sum())
-
-        st.subheader("По маркам")
-        st.table(df.groupby("grade")["volume"].sum())
+with tabs[1]:
+    d = st.date_input("Дата", date.today())
+    df = pd.read_sql("SELECT * FROM shipments WHERE dt=?", conn,
+                     params=(d.strftime("%d.%m.%Y"),))
+    st.dataframe(df, use_container_width=True)
 
 # ======================================================
-# 📈 ГРАФИКИ
+# 🚛 ВОДИТЕЛИ
 # ======================================================
-with tab[tabs.index("📈 Графики")]:
-    df = pd.read_sql("SELECT * FROM shipments", conn)
-
-    if not df.empty:
-        st.line_chart(df.groupby("date")["volume"].sum())
-        st.bar_chart(df.groupby("driver")["volume"].sum())
-        st.bar_chart(df.groupby("grade")["volume"].sum())
-
-# ======================================================
-# 💰 ОПЛАТЫ
-# ======================================================
-if "💰 Оплаты" in tabs:
-    with tab[tabs.index("💰 Оплаты")]:
-        df = pd.read_sql("SELECT * FROM shipments", conn)
-        df["Долг"] = df["price"] - df["paid"]
-
-        st.metric("Всего к оплате", df["price"].sum())
-        st.metric("Оплачено", df["paid"].sum())
-        st.metric("Долг", df["Долг"].sum())
-
-        st.dataframe(df, use_container_width=True)
+with tabs[2]:
+    df = pd.read_sql("SELECT driver,COUNT(*) рейсов FROM shipments GROUP BY driver", conn)
+    st.table(df)
 
 # ======================================================
 # LOGOUT
 # ======================================================
 st.divider()
 if st.button("🚪 Выйти"):
+    st.experimental_set_query_params()
     st.session_state.clear()
     st.rerun()

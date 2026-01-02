@@ -3,239 +3,218 @@ import pandas as pd
 import sqlite3
 import io
 import urllib.parse
-import hashlib
 from datetime import datetime, date
 
 # ======================================================
-# 1. КОНФИГУРАЦИЯ И БЕЗОПАСНОСТЬ
+# 1. КОНФИГУРАЦИЯ И ДИЗАЙН
 # ======================================================
-st.set_page_config(page_title="Бетон Завод PRO", layout="wide")
+st.set_page_config(page_title="Бетон Завод PRO", layout="wide", page_icon="🏗️")
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #f8f9fa; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
+    .metric-card { background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    div[data-testid="stMetricValue"] { font-size: 24px; color: #007bff; }
+    </style>
+    """, unsafe_allow_html=True)
+
 DB_NAME = "database.db"
 
-def hash_password(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-# Пароли (Логин: Пароль)
-USERS = {
-    "director": {"hash": hash_password("1234"), "role": "director"},
-    "buh": {"hash": hash_password("1111"), "role": "accountant"},
-    "oper": {"hash": hash_password("2222"), "role": "operator"},
-}
-
-# ======================================================
-# 2. РАБОТА С БАЗОЙ ДАННЫХ
-# ======================================================
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS shipments(
+        conn.execute("""CREATE TABLE IF NOT EXISTS shipments(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dt TEXT, tm TEXT, object TEXT, grade TEXT, 
             driver TEXT, volume REAL, price_m3 REAL, 
-            total REAL, paid REAL, debt REAL, invoice TEXT, msg TEXT
-        )""")
+            total REAL, paid REAL, debt REAL, invoice TEXT, msg TEXT)""")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_drivers (name TEXT UNIQUE)")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_grades (name TEXT UNIQUE)")
+        conn.commit()
 
 def get_list(table):
     try:
         with sqlite3.connect(DB_NAME) as conn:
-            # Сортировка по алфавиту и порядку
             res = conn.execute(f"SELECT name FROM {table} ORDER BY name ASC").fetchall()
             return [r[0] for r in res]
-    except:
-        return []
-
-def delete_item(table, name):
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.execute(f"DELETE FROM {table} WHERE name = ?", (name,))
-    st.rerun()
+    except: return []
 
 init_db()
 
 # ======================================================
-# 3. АВТОРИЗАЦИЯ (С ЗАЩИТОЙ ОТ ОБНОВЛЕНИЯ СТРАНИЦЫ)
+# 2. АВТОРИЗАЦИЯ
 # ======================================================
 if "auth" not in st.session_state:
     st.session_state.auth = False
 
-# Если страница обновилась, проверяем логин в адресной строке
 if not st.session_state.auth:
-    query_params = st.query_params
-    saved_user = query_params.get("logged_user")
-    if saved_user in USERS:
-        st.session_state.update({
-            "auth": True, 
-            "user": saved_user, 
-            "role": USERS[saved_user]["role"]
-        })
-
-if not st.session_state.auth:
-    st.title("🔐 Вход")
-    login = st.text_input("Логин")
-    psw = st.text_input("Пароль", type="password")
-    if st.button("Войти"):
-        if login in USERS and USERS[login]["hash"] == hash_password(psw):
-            st.session_state.update({"auth": True, "user": login, "role": USERS[login]["role"]})
-            st.query_params["logged_user"] = login
-            st.rerun()
-        else:
-            st.error("Ошибка входа")
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("<h1 style='text-align: center;'>🏗️ БЕТОН ЗАВОД PRO</h1>", unsafe_allow_html=True)
+        with st.container(border=True):
+            login = st.text_input("Логин")
+            psw = st.text_input("Пароль", type="password")
+            if st.button("Вход в систему"):
+                if login == "admin" and psw == "1234": # Смените на свои
+                    st.session_state.update({"auth": True, "user": login, "role": "director"})
+                    st.rerun()
+                else: st.error("Ошибка доступа")
     st.stop()
 
 # ======================================================
-# 4. БОКОВОЕ МЕНЮ (НАСТРОЙКИ С ОЧИСТКОЙ И УДАЛЕНИЕМ)
+# 3. БОКОВОЕ МЕНЮ (СПРАВОЧНИКИ)
 # ======================================================
-st.sidebar.header(f"👤 {st.session_state.user}")
-
-if st.session_state.role == "director":
-    with st.sidebar.expander("⚙️ НАСТРОЙКИ ЗАВОДА"):
-        
-        # --- ВОДИТЕЛИ ---
-        st.subheader("Водители")
-        if "drv_key" not in st.session_state: st.session_state.drv_key = 0
-        
-        new_drv = st.text_input("Имя водителя", key=f"drv_input_{st.session_state.drv_key}")
-        if st.button("➕ Добавить"):
+with st.sidebar:
+    st.title("⚙️ Настройки")
+    st.write(f"👤: **{st.session_state.user}**")
+    
+    with st.expander("🚚 Водители"):
+        new_drv = st.text_input("ФИО водителя")
+        if st.button("Добавить"):
             if new_drv:
                 with sqlite3.connect(DB_NAME) as conn:
                     conn.execute("INSERT OR IGNORE INTO ref_drivers (name) VALUES (?)", (new_drv.strip(),))
-                st.session_state.drv_key += 1 # Меняем ключ для очистки поля
+                    conn.commit()
                 st.rerun()
-
         for d in get_list("ref_drivers"):
-            col1, col2 = st.columns([4, 1])
-            col1.write(d)
-            with col2.popover("🗑"):
-                if st.button("Удалить", key=f"del_d_{d}"):
-                    delete_item("ref_drivers", d)
+            st.caption(f"• {d}")
 
-        st.divider()
-
-        # --- МАРКИ БЕТОНА ---
-        st.subheader("Марки")
-        if "grd_key" not in st.session_state: st.session_state.grd_key = 0
-        
-        new_grd = st.text_input("Новая марка", key=f"grd_input_{st.session_state.grd_key}")
-        if st.button("➕ Добавить марку"):
+    with st.expander("💎 Марки бетона"):
+        new_grd = st.text_input("Название марки")
+        if st.button("Сохранить марку"):
             if new_grd:
                 with sqlite3.connect(DB_NAME) as conn:
                     conn.execute("INSERT OR IGNORE INTO ref_grades (name) VALUES (?)", (new_grd.strip(),))
-                st.session_state.grd_key += 1
+                    conn.commit()
                 st.rerun()
 
-        for g in get_list("ref_grades"):
-            col1, col2 = st.columns([4, 1])
-            col1.write(g)
-            with col2.popover("🗑"):
-                if st.button("Удалить", key=f"del_g_{g}"):
-                    delete_item("ref_grades", g)
+    st.divider()
+    with open(DB_NAME, "rb") as f:
+        st.download_button("📥 Резервная копия базы (DB)", f, file_name=f"base_{date.today()}.db")
+    
+    if st.button("🚪 Выход"):
+        st.session_state.clear()
+        st.rerun()
 
-if st.sidebar.button("🚪 Выйти"):
-    st.query_params.clear()
-    st.session_state.clear()
-    st.rerun()
-
+# ======================================================
+# 4. ГЛАВНЫЙ ИНТЕРФЕЙС
+# ======================================================
 DRIVERS_LIST = get_list("ref_drivers")
 GRADES_LIST = get_list("ref_grades")
 
-# ======================================================
-# 5. ОСНОВНОЙ ИНТЕРФЕЙС
-# ======================================================
-t1, t2, t3, t4 = st.tabs(["📝 Отгрузка", "📊 Отчёты", "📈 Графики", "🚛 Статистика"])
+t1, t2, t3, t4 = st.tabs(["📝 Отгрузка", "📊 Журнал", "🏗️ Сводка по объектам", "📈 Аналитика"])
 
-# --- ВКЛАДКА: ОТГРУЗКА ---
+# --- ВКЛАДКА 1: НОВАЯ ОТГРУЗКА ---
 with t1:
-    if not DRIVERS_LIST or not GRADES_LIST:
-        st.info("💡 Откройте меню слева и добавьте данные в настройках.")
-    else:
-        st.subheader("Новая запись")
-        obj = st.text_input("📍 Объект")
+    st.subheader("Формирование новой накладной")
+    with st.container(border=True):
         c1, c2 = st.columns(2)
-        grade = c1.selectbox("💎 Марка", GRADES_LIST)
-        selected = c2.multiselect("🚛 Водители", DRIVERS_LIST)
+        obj_name = c1.text_input("📍 Объект", placeholder="Куда везем?")
+        grade_name = c2.selectbox("💎 Марка", GRADES_LIST)
+        selected_drvs = st.multiselect("🚛 Выберите водителей", DRIVERS_LIST)
 
-        price, paid_total = 0.0, 0.0
-        if st.session_state.role in ["accountant", "director"]:
-            f1, f2 = st.columns(2)
-            price = f1.number_input("Цена за м³", min_value=0.0, step=100.0)
-            paid_total = f2.number_input("Оплачено всего", min_value=0.0, step=500.0)
+    if selected_drvs:
+        st.write("### Детали машин")
+        f1, f2 = st.columns(2)
+        price_val = f1.number_input("Цена за м³", min_value=0.0, step=100.0, value=2500.0)
+        prepaid = f2.number_input("Общая предоплата на этот выезд", min_value=0.0)
 
-        entries = []
-        wa_text = f"🏗 *ОТГРУЗКА БЕТОНА*\n📍 Объект: {obj}\n💎 Марка: {grade}\n────────────\n"
+        shipment_entries = []
+        for d in selected_drvs:
+            with st.container(border=True):
+                col_a, col_b, col_c = st.columns([1, 1, 2])
+                v = col_a.number_input(f"м³ ({d})", 0.0, 50.0, step=0.5, key=f"v_{d}")
+                i = col_b.text_input(f"Накладная", key=f"i_{d}")
+                if v > 0:
+                    total_r = v * price_val
+                    paid_r = prepaid / len(selected_drvs) if prepaid > 0 else 0
+                    shipment_entries.append([
+                        date.today().isoformat(), datetime.now().strftime("%H:%M"),
+                        obj_name, grade_name, d, v, price_val, total_r, paid_r, (total_r - paid_r), i
+                    ])
 
-        for d in selected:
-            sc1, sc2, sc3 = st.columns([2, 1, 1])
-            sc1.write(f"**{d}**")
-            vol = sc2.number_input("м³", 0.0, step=0.5, key=f"v_{d}")
-            inv = sc3.text_input("№ Накл.", key=f"i_{d}")
-            if vol > 0:
-                total = vol * price
-                share_paid = paid_total / len(selected) if paid_total > 0 else 0
-                debt = total - share_paid
-                now = datetime.now()
-                entries.append([
-                    now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"),
-                    obj, grade, d, vol, price, total, share_paid, debt, inv, ""
-                ])
-                wa_text += f"🚛 {d}: *{vol} м³* (№{inv})\n"
-
-        if st.button("💾 СОХРАНИТЬ В БАЗУ", use_container_width=True):
-            if not obj or not entries:
-                st.warning("Заполните данные")
+        if st.button("💾 СОХРАНИТЬ В БАЗУ", type="primary"):
+            if not obj_name or not shipment_entries:
+                st.error("Заполните объект и объем!")
             else:
-                for e in entries: e[11] = wa_text
                 with sqlite3.connect(DB_NAME) as conn:
-                    conn.executemany("INSERT INTO shipments (dt,tm,object,grade,driver,volume,price_m3,total,paid,debt,invoice,msg) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", entries)
-                st.success("Данные успешно сохранены!")
-                st.session_state.last_wa = wa_text
-                st.rerun() # Чтобы закрыть шторки и очистить форму
+                    conn.executemany("""INSERT INTO shipments 
+                        (dt, tm, object, grade, driver, volume, price_m3, total, paid, debt, invoice) 
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""", shipment_entries)
+                    conn.commit()
+                st.success("Данные сохранены!")
+                st.balloons()
+                st.rerun()
 
-        if "last_wa" in st.session_state:
-            wa_url = f"https://wa.me/?text={urllib.parse.quote(st.session_state.last_wa)}"
-            st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background:#25D366; color:white; border:none; padding:12px; border-radius:8px; width:100%; cursor:pointer; font-weight:bold;">📲 ОТПРАВИТЬ В WHATSAPP</button></a>', unsafe_allow_html=True)
-
-# --- ВКЛАДКА: ОТЧЕТЫ (УЛУЧШЕННЫЙ EXCEL) ---
+# --- ВКЛАДКА 2: ЖУРНАЛ + РЕДАКТИРОВАНИЕ ---
 with t2:
-    st.subheader("Поиск и фильтры")
-    fc1, fc2 = st.columns(2)
-    f_date = fc1.date_input("Дата", date.today())
+    st.subheader("📖 Журнал всех отгрузок")
+    
+    # Фильтры
+    fc1, fc2, fc3 = st.columns([2, 2, 1])
+    d_range = fc1.date_input("Период", [date.today(), date.today()])
     f_drv = fc2.selectbox("Водитель", ["Все"] + DRIVERS_LIST)
-
-    query = "SELECT dt as 'Дата', tm as 'Время', object as 'Объект', grade as 'Марка', driver as 'Водитель', volume as 'Объем', price_m3 as 'Цена', total as 'Сумма', paid as 'Оплачено', debt as 'Долг', invoice as 'Накладная' FROM shipments WHERE dt = ?"
-    params = [str(f_date)]
-    if f_drv != "Все":
-        query += " AND driver = ?"
-        params.append(f_drv)
-
+    
     with sqlite3.connect(DB_NAME) as conn:
-        df = pd.read_sql(query, conn, params=params)
+        q = "SELECT * FROM shipments WHERE 1=1"
+        p = []
+        if len(d_range) == 2:
+            q += " AND dt BETWEEN ? AND ?"
+            p.extend([str(d_range[0]), str(d_range[1])])
+        df_journal = pd.read_sql(q, conn, params=p)
 
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Отчет')
-            worksheet = writer.sheets['Отчет']
-            for i, col in enumerate(df.columns):
-                width = max(df[col].astype(str).str.len().max(), len(col)) + 2
-                worksheet.set_column(i, i, width)
+    if not df_journal.empty:
+        if f_drv != "Все": df_journal = df_journal[df_journal['driver'] == f_drv]
         
-        st.download_button(label="📥 СКАЧАТЬ EXCEL", data=buf.getvalue(), file_name=f"rep_{f_date}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.info("Нет записей")
+        st.dataframe(df_journal.drop(columns=['msg'], errors='ignore'), use_container_width=True, hide_index=True)
+        
+        # Редактирование
+        with st.expander("🛠️ Редактировать / Удалить по ID"):
+            edit_id = st.number_input("ID записи", min_value=0, step=1)
+            if edit_id > 0:
+                row = df_journal[df_journal['id'] == edit_id]
+                if not row.empty:
+                    ec1, ec2, ec3 = st.columns(3)
+                    new_v = ec1.number_input("Объем", value=float(row['volume'].values[0]))
+                    new_p = ec2.number_input("Оплачено", value=float(row['paid'].values[0]))
+                    new_i = ec3.text_input("Накладная", value=str(row['invoice'].values[0]))
+                    
+                    b_save, b_del = st.columns(2)
+                    if b_save.button("💾 Применить правки"):
+                        new_t = new_v * float(row['price_m3'].values[0])
+                        with sqlite3.connect(DB_NAME) as conn:
+                            conn.execute("UPDATE shipments SET volume=?, paid=?, invoice=?, total=?, debt=? WHERE id=?", 
+                                         (new_v, new_p, new_i, new_t, (new_t-new_p), edit_id))
+                            conn.commit()
+                        st.rerun()
+                    if b_del.button("🗑️ Удалить запись"):
+                        with sqlite3.connect(DB_NAME) as conn:
+                            conn.execute("DELETE FROM shipments WHERE id=?", (edit_id,))
+                            conn.commit()
+                        st.rerun()
+    else: st.info("Нет записей")
 
-# --- ВКЛАДКА: ГРАФИКИ ---
-with t3:
-    with sqlite3.connect(DB_NAME) as conn:
-        df_all = pd.read_sql("SELECT driver, volume FROM shipments", conn)
-    if not df_all.empty:
-        st.write("### Объем по водителям (м³)")
-        st.bar_chart(df_all.groupby("driver")["volume"].sum())
-
-# --- ВКЛАДКА: ВОДИТЕЛИ ---
+# --- ВКЛАДКА 3: СВОДКА ПО ОБЪЕКТАМ ---
 with t4:
+    st.subheader("🏗️ Состояние по объектам")
     with sqlite3.connect(DB_NAME) as conn:
-        df_d = pd.read_sql("SELECT driver as 'Водитель', SUM(volume) as 'Всего м3', COUNT(id) as 'Рейсов' FROM shipments GROUP BY driver", conn)
-    if not df_d.empty:
-        st.table(df_d)
+        df_obj = pd.read_sql("""SELECT object, SUM(volume) as v, SUM(total) as t, SUM(paid) as p, SUM(debt) as d 
+                                FROM shipments GROUP BY object""", conn)
+    
+    if not df_obj.empty:
+        for _, r in df_obj.iterrows():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                c1.markdown(f"#### 📍 {r['object']}")
+                c2.metric("Объем", f"{r['v']} м³")
+                c3.metric("Долг", f"{r['d']:,.0f}")
+                progress = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
+                st.progress(progress, text=f"Оплачено {progress:.1%}")
+    else: st.info("Нет данных")
+
+# --- ВКЛАДКА 4: АНАЛИТИКА ---
+with t3:
+    st.subheader("📈 Аналитика")
+    if not df_journal.empty:
+        st.bar_chart(df_journal.groupby("driver")["volume"].sum())
+        st.area_chart(df_journal.groupby("dt")["volume"].sum())

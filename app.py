@@ -6,22 +6,41 @@ import urllib.parse
 from datetime import datetime, date
 
 # ======================================================
-# 1. КОНФИГУРАЦИЯ И СТИЛИ
+# 1. КОНФИГУРАЦИЯ И СТИЛИ (ИСПРАВЛЕНО ДЛЯ МОБИЛЬНЫХ)
 # ======================================================
-st.set_page_config(page_title="Бетон Завод PRO", layout="wide", page_icon="🏗️")
+# Добавлено initial_sidebar_state="collapsed" для корректной работы шторки
+st.set_page_config(
+    page_title="Бетон Завод PRO", 
+    layout="wide", 
+    page_icon="🏗️",
+    initial_sidebar_state="collapsed" 
+)
 
 st.markdown("""
     <style>
+    /* Основной фон */
     .stApp { background-color: #f8f9fc; }
+    
+    /* Исправление для мобильных: чтобы шторка не перекрывала клики */
+    @media (max-width: 768px) {
+        .st-emotion-cache-16idsys p { font-size: 14px; }
+        div[data-testid="stSidebarCollapseButton"] { margin-bottom: 20px; }
+    }
+
+    /* Красивые карточки */
     div[data-testid="stVerticalBlock"] > div:has(div[style*="border"]) {
         background: white !important;
-        padding: 25px !important;
+        padding: 20px !important;
         border-radius: 15px !important;
         border: none !important;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
         margin-bottom: 10px;
     }
-    .stButton>button { border-radius: 8px; font-weight: 600; height: 3em; }
+
+    /* Кнопки */
+    .stButton>button { border-radius: 8px; font-weight: 600; height: 3.5em; width: 100%; }
+    
+    /* WhatsApp Кнопка */
     .wa-button { 
         background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
         color: white !important; padding: 15px; border-radius: 10px;
@@ -47,7 +66,6 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS ref_grades (name TEXT UNIQUE)")
         conn.execute("CREATE TABLE IF NOT EXISTS ref_plants (name TEXT UNIQUE)")
         
-        # Начальные настройки заводов
         conn.executemany("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", [("УЧАСТОК",), ("888",)])
         conn.commit()
 
@@ -61,20 +79,17 @@ def get_list(table):
 init_db()
 
 # ======================================================
-# 3. АВТОРИЗАЦИЯ (ОБНОВЛЕННЫЕ ПОЛЬЗОВАТЕЛИ)
+# 3. АВТОРИЗАЦИЯ
 # ======================================================
-USERS = {
-    "admin": "1234",
-    "buh": "1111"
-}
+USERS = {"admin": "1234", "buh": "1111"}
 
 if "auth" not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    _, col2, _ = st.columns([1, 1.2, 1])
+    _, col2, _ = st.columns([0.1, 0.8, 0.1])
     with col2:
-        st.markdown("<h1 style='text-align: center;'>🏗️ БЕТОН ЗАВОД PRO</h1>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🏗️ БЕТОН ЗАВОД PRO</h2>", unsafe_allow_html=True)
         with st.container(border=True):
             login = st.text_input("Логин")
             psw = st.text_input("Пароль", type="password")
@@ -86,50 +101,42 @@ if not st.session_state.auth:
     st.stop()
 
 # ======================================================
-# 4. БОКОВОЕ МЕНЮ (ПРАВА ДОСТУПА)
+# 4. БОКОВОЕ МЕНЮ
 # ======================================================
 cur_user = st.session_state.user
 
 with st.sidebar:
     st.title("⚙️ Настройки")
-    st.write(f"Пользователь: **{cur_user}**")
+    st.write(f"Аккаунт: **{cur_user}**")
     
-    # Секция для БУХГАЛТЕРА и АДМИНА (только водители)
     if cur_user in ["admin", "buh"]:
-        with st.expander("🚚 Управление водителями", expanded=True):
+        with st.expander("🚚 Водители", expanded=(cur_user == "buh")):
             new_drv = st.text_input("ФИО нового водителя")
             if st.button("➕ Добавить"):
                 if new_drv:
                     with sqlite3.connect(DB_NAME) as conn:
                         conn.execute("INSERT OR IGNORE INTO ref_drivers (name) VALUES (?)", (new_drv.strip(),))
                     st.rerun()
-            
             st.divider()
-            st.caption("Список и удаление:")
-            all_drivers = get_list("ref_drivers")
-            for drv in all_drivers:
+            for drv in get_list("ref_drivers"):
                 c_n, c_d = st.columns([4, 1])
-                c_n.write(drv)
+                c_n.caption(drv)
                 if c_d.button("🗑️", key=f"del_{drv}"):
                     with sqlite3.connect(DB_NAME) as conn:
                         conn.execute("DELETE FROM ref_drivers WHERE name = ?", (drv,))
                     st.rerun()
 
-    # Секция ТОЛЬКО для АДМИНА (заводы и марки)
     if cur_user == "admin":
         with st.expander("🏭 Заводы и Марки"):
-            st.caption("Заводы")
-            new_plt = st.text_input("Название завода")
-            if st.button("➕ Добавить завод"):
+            new_plt = st.text_input("Новый завод")
+            if st.button("➕ Завод"):
                 if new_plt:
                     with sqlite3.connect(DB_NAME) as conn:
                         conn.execute("INSERT OR IGNORE INTO ref_plants (name) VALUES (?)", (new_plt.strip(),))
                     st.rerun()
-            
             st.divider()
-            st.caption("Марки бетона")
-            new_grd = st.text_input("Название марки")
-            if st.button("➕ Добавить марку"):
+            new_grd = st.text_input("Новая марка")
+            if st.button("➕ Марка"):
                 if new_grd:
                     with sqlite3.connect(DB_NAME) as conn:
                         conn.execute("INSERT OR IGNORE INTO ref_grades (name) VALUES (?)", (new_grd.strip(),))
@@ -149,79 +156,60 @@ DRIVERS = get_list("ref_drivers")
 
 t1, t2, t3, t4 = st.tabs(["📝 ОТГРУЗКА", "📖 ЖУРНАЛ", "🏗️ ОБЪЕКТЫ", "📈 АНАЛИТИКА"])
 
-# --- ВКЛАДКА 1: ОТГРУЗКА ---
 with t1:
     with st.container(border=True):
-        st.subheader("🛠️ Новая накладная")
-        c1, c2, c3 = st.columns(3)
-        p_sel = c1.selectbox("Завод погрузки", PLANTS if PLANTS else ["Добавьте заводы в настройках"])
-        obj_in = c2.text_input("📍 Объект (стройплощадка)")
-        g_sel = c3.selectbox("💎 Марка бетона", GRADES if GRADES else ["Добавьте марки"])
+        st.markdown("### 🛠️ Новая накладная")
+        p_sel = st.selectbox("Завод погрузки", PLANTS)
+        obj_in = st.text_input("📍 Объект")
+        g_sel = st.selectbox("💎 Марка бетона", GRADES)
         drvs_sel = st.multiselect("🚛 Выберите водителей", DRIVERS)
 
     if drvs_sel:
-        st.subheader("📦 Объемы и оплата")
+        st.subheader("📦 Детали")
         f1, f2 = st.columns(2)
-        price = f1.number_input("Цена за м³", min_value=0, step=100, format="%d")
-        prepaid = f2.number_input("Общая предоплата", min_value=0, step=500, format="%d")
+        price = f1.number_input("Цена за м³", min_value=0, step=100)
+        prepaid = f2.number_input("Предоплата", min_value=0, step=500)
 
         entries = []
         wa_text = f"🏗️ *БЕТОН-ЗАВОД*\n🏭 Завод: {p_sel}\n📍 Объект: {obj_in}\n💎 Марка: {g_sel}\n────────────────\n"
         
-        grid = st.columns(2)
-        for idx, d in enumerate(drvs_sel):
-            with grid[idx % 2]:
-                with st.container(border=True):
-                    ca, cb = st.columns([2, 1])
-                    v = ca.number_input(f"м³ ({d})", min_value=0.0, step=0.1, key=f"v_{d}")
-                    inv = cb.text_input(f"Накл. №", key=f"inv_{d}")
-                    if v > 0:
-                        total = v * price
-                        paid = prepaid / len(drvs_sel) if prepaid > 0 else 0
-                        entries.append((date.today().isoformat(), datetime.now().strftime("%H:%M"), p_sel, obj_in, g_sel, d, v, price, total, paid, total-paid, inv))
-                        wa_text += f"🚛 {d}: *{v} м³* (№{inv})\n"
+        for d in drvs_sel:
+            with st.container(border=True):
+                ca, cb = st.columns([2, 1])
+                v = ca.number_input(f"м³ ({d})", min_value=0.0, step=0.1, key=f"v_{d}")
+                inv = cb.text_input(f"Накл. №", key=f"inv_{d}")
+                if v > 0:
+                    total = v * price
+                    paid = prepaid / len(drvs_sel) if prepaid > 0 else 0
+                    entries.append((date.today().isoformat(), datetime.now().strftime("%H:%M"), p_sel, obj_in, g_sel, d, v, price, total, paid, total-paid, inv))
+                    wa_text += f"🚛 {d}: *{v} м³* (№{inv})\n"
 
-        if st.button("💾 СОХРАНИТЬ В БАЗУ", type="primary"):
-            if not obj_in or not entries:
-                st.warning("Заполните объект и объем")
-            else:
+        if st.button("💾 СОХРАНИТЬ", type="primary"):
+            if obj_in and entries:
                 with sqlite3.connect(DB_NAME) as conn:
                     conn.executemany("INSERT INTO shipments (dt,tm,plant,object,grade,driver,volume,price_m3,total,paid,debt,invoice) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", entries)
                 st.session_state.last_wa = wa_text
-                st.success("✅ Данные успешно сохранены!")
                 st.rerun()
 
         if "last_wa" in st.session_state:
             enc_text = urllib.parse.quote(st.session_state.last_wa)
-            st.markdown(f'<a href="https://wa.me/?text={enc_text}" target="_blank" class="wa-button">📲 ОТПРАВИТЬ В WHATSAPP</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/?text={enc_text}" target="_blank" class="wa-button">📲 ОТПРАВИТЬ WHATSAPP</a>', unsafe_allow_html=True)
 
-# Оставшиеся вкладки (Журнал, Сводка, Аналитика)
 with t2:
-    st.subheader("📖 История отгрузок")
     with sqlite3.connect(DB_NAME) as conn:
-        df_log = pd.read_sql("SELECT id, dt, tm, plant, object, driver, volume, total, debt FROM shipments ORDER BY id DESC", conn)
-    st.dataframe(df_log, use_container_width=True, hide_index=True)
+        df = pd.read_sql("SELECT id, dt, tm, plant, object, driver, volume, total, debt FROM shipments ORDER BY id DESC", conn)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 with t3:
-    st.subheader("🏗️ Состояние по объектам")
     with sqlite3.connect(DB_NAME) as conn:
-        df_obj = pd.read_sql("SELECT object, SUM(volume) as v, SUM(total) as t, SUM(paid) as p, SUM(debt) as d FROM shipments GROUP BY object", conn)
-    if not df_obj.empty:
-        grid_obj = st.columns(3)
-        for idx, r in df_obj.iterrows():
-            with grid_obj[idx % 3]:
-                with st.container(border=True):
-                    st.markdown(f"### 📍 {r['object']}")
-                    st.metric("Отгружено", f"{r['v']:.1f} м³")
-                    st.metric("Долг", f"{int(r['d']):,} ₸")
-                    prog = min(r['p']/r['t'], 1.0) if r['t'] > 0 else 0
-                    st.progress(prog)
-    else: st.info("Нет данных")
+        df_obj = pd.read_sql("SELECT object, SUM(volume) as v, SUM(debt) as d FROM shipments GROUP BY object", conn)
+    for _, r in df_obj.iterrows():
+        with st.container(border=True):
+            st.write(f"**📍 {r['object']}**")
+            st.write(f"Объем: {r['v']} | Долг: {int(r['d']):,} ₸")
 
 with t4:
-    st.subheader("📈 Краткая аналитика")
     with sqlite3.connect(DB_NAME) as conn:
-        df_an = pd.read_sql("SELECT dt, volume, total FROM shipments", conn)
+        df_an = pd.read_sql("SELECT dt, volume FROM shipments", conn)
     if not df_an.empty:
         st.area_chart(df_an.groupby('dt')['volume'].sum())
-    else: st.info("Данных нет")

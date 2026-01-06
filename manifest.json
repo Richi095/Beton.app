@@ -1,0 +1,20 @@
+{
+  "name": "BetonGo Pro",
+  "short_name": "BetonGo",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f1f2f6",
+  "theme_color": "#00b894",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2821/2821768.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2821/2821768.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
